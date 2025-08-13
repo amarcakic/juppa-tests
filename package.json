@@ -1,0 +1,25 @@
+{
+  "name": "juppa-tests",
+  "version": "1.0.0",
+  "devDependencies": {
+    "cypress": "^12.0.0",
+    "eslint": "^8.0.0",
+    "eslint-plugin-cypress": "^2.12.1",
+    "mochawesome": "^7.1.3",
+    "mochawesome-merge": "^4.2.0",
+    "mochawesome-report-generator": "^6.2.0",
+    "start-server-and-test": "^2.0.13",
+    "npm-run-all": "^4.1.5"
+  },
+  "scripts": {
+    "lint": "eslint cypress/**/*.js",
+    "cy:run": "cypress run",
+    "start-frontend": "npm --prefix juppa-frontend start",
+    "start-backend": "cd juppa-backend && python manage.py runserver 0.0.0.0:5050",
+    "start-all": "npm-run-all --parallel start-backend start-frontend",
+    "test:smoke": "start-server-and-test start-all http://localhost:3000 \"cypress run --env grepTags=@smoke --config retries=2 --config-file cypress.config.js\"",
+    "test:e2e": "start-server-and-test start-all http://localhost:3000 \"cypress run --config retries=2 --config-file cypress.config.staging.js\"",
+    "ci:smoke": "npm run test:smoke",
+    "ci:e2e": "npm run test:e2e"
+  }
+}

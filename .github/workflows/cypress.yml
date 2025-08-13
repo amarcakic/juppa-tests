@@ -1,0 +1,143 @@
+name: Cypress Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '10 22 * * *' # nightly at midnight CEST
+
+jobs:
+  cypress-run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    steps:
+      # --- CHECKOUT REPOS ---
+      - name: Checkout tests
+        uses: actions/checkout@v4
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: amarcakic/juppa-frontend
+          path: juppa-frontend
+
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          repository: amarcakic/juppa-backend
+          path: juppa-backend
+
+      # --- SETUP ---
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            cypress-${{ runner.os }}-
+
+      # --- INSTALL DEPS ---
+      - name: Install backend deps
+        working-directory: juppa-backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install frontend deps
+        working-directory: juppa-frontend
+        run: npm ci
+
+      - name: Install test deps
+        run: npm ci
+
+      # --- RUN TESTS ---
+      - name: Run Smoke Tests (Push)
+        if: github.event_name == 'push'
+        run: npm run ci:smoke
+
+      - name: Run Full E2E Tests (Manual/Scheduled)
+        if: github.event_name != 'push'
+        run: npm run ci:e2e
+
+      # --- MERGE REPORTS ---
+      - name: Merge Mochawesome reports
+        if: always()
+        run: |
+          mkdir -p public
+          npx mochawesome-merge cypress/reports/*.json > public/report.json
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          npx marge public/report.json -o public
+          mv public/report.html public/index.html
+
+      # --- UPLOAD ARTIFACTS ---
+      - name: Upload Cypress report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-report
+          path: public
+
+      - name: Upload Screenshots & Videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-assets
+          path: |
+            cypress/screenshots
+            cypress/videos
+
+      - name: Upload Pages artifact
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        if: always()
+        uses: actions/deploy-pages@v4
+
+      # --- SUMMARY ---
+      - name: Add Cypress test summary
+        if: always()
+        run: |
+          if [ ! -f public/report.json ]; then
+            echo "## Cypress Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "❌ No report found. Tests may not have run." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          PASSED=$(jq '.stats.passes' public/report.json)
+          FAILED=$(jq '.stats.failures' public/report.json)
+          PENDING=$(jq '.stats.pending' public/report.json)
+          TOTAL=$(jq '.stats.tests' public/report.json)
+          DURATION=$(jq '.stats.duration' public/report.json)
+          PASS_RATE=$(awk "BEGIN {printf \"%.2f\", ($PASSED/$TOTAL)*100}")
+
+          echo "## Cypress Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "**$TOTAL tests** in $DURATION ms" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Passed: $PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Failed: $FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "- ⏭ Pending: $PENDING" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 Pass rate: $PASS_RATE%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
+          echo "[📄 View Full HTML Report](https://${GITHUB_ACTOR}.github.io/$REPO_NAME/)" >> $GITHUB_STEP_SUMMARY
